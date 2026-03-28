@@ -136,6 +136,8 @@ cached-path = { workspace = true, features = [
   "progress-bar",
   "rustls-tls",
 ], optional = true }
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))'.dependencies]
 evdev = { version = "0.13.2", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -259,9 +261,11 @@ sim = [
   "dep:cu29-helpers",
   "dep:cu-consolemon",
   "dep:cached-path",
+]
+bevymon = ["sim_core", "dep:cu-bevymon", "dep:cached-path"]
+rc = [
   "dep:evdev",
 ]
-bevymon = ["sim_core", "dep:cu-bevymon", "dep:cached-path", "dep:evdev"]
 
 [lib]
 name = "cu_flight_controller_export"
@@ -278,7 +282,7 @@ required-features = ["firmware"]
 [[bin]]
 name = "rc-tester"
 path = "src/sim/rc_tester.rs"
-required-features = ["sim"]
+required-features = ["sim", "rc"]
 
 [[bin]]
 name = "quad-logreader"

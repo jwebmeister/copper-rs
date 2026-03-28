@@ -28,7 +28,7 @@ rc:
   #!/usr/bin/env bash
   set -euo pipefail
   cd "{{ROOT}}"
-  cargo run -p cu-flight-controller --no-default-features --features sim --bin rc-tester
+  cargo run -p cu-flight-controller --no-default-features --features sim,rc --bin rc-tester
 
 # Run the Bevy + Copper simulation loop.
 sim:

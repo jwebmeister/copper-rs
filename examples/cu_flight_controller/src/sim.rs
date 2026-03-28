@@ -3,7 +3,7 @@ extern crate alloc;
 
 #[cfg(feature = "sim")]
 mod messages;
-#[cfg(feature = "sim")]
+#[cfg(all(feature = "sim", feature = "rc"))]
 #[path = "sim/rc_joystick.rs"]
 mod rc_joystick;
 #[cfg(feature = "sim")]
@@ -46,7 +46,7 @@ use cu29::prelude::*;
 #[cfg(all(not(target_arch = "wasm32"), feature = "sim"))]
 use cu29_helpers::basic_copper_setup;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "rc"))]
 use crate::rc_joystick::{RcAxisBindings, RcFrame, RcJoystick};
 use cu_crsf::messages::RcChannelsPayload;
 use cu_msp_bridge::MspRequestBatch;
@@ -149,7 +149,7 @@ enum RcInputSource {
 
 #[derive(Resource, Default)]
 struct SimJoystickState {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "rc"))]
     reader: Option<RcJoystick>,
 }
 
@@ -403,7 +403,7 @@ const LOCAL_CITY_BBOX_MAX_UNITS: Vec3 = Vec3::new(18_754.953, 11_102.407, 35_871
 const LOCAL_CITY_SCALE: f32 = 0.01;
 const SIM_SPAWN_POSITION: Vec3 = Vec3::new(-10.0, 1.0, 20.0);
 const SIM_SPAWN_YAW_DEG: f32 = 180.0;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "rc"))]
 const ARM_SWITCH_NAMES: &[&str] = &["sf", "se", "arm", "btn1"];
 // With the corrected 0.44 kg sim mass and 10% airmode idle, hover is about 0.48.
 // Keep keyboard idle slightly below hover so release-to-descend works again.
@@ -1156,7 +1156,7 @@ fn spawn_help_overlay(
     spawned.help = true;
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "rc"))]
 fn setup_joystick(
     mut rc_input: ResMut<SimRcInput>,
     mut rc_source: ResMut<RcInputSource>,
@@ -1185,14 +1185,14 @@ fn setup_joystick(
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", not(feature = "rc")))]
 fn setup_joystick(mut rc_input: ResMut<SimRcInput>, mut rc_source: ResMut<RcInputSource>) {
     *rc_source = RcInputSource::Keyboard;
     init_keyboard_rc(&mut rc_input);
-    info!("sim rc: web build using keyboard controls (disarmed start, Space arms Angle mode)");
+    info!("sim rc: build using keyboard controls (disarmed start, Space arms Angle mode)");
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "rc"))]
 fn poll_joystick(
     mut joystick: ResMut<SimJoystickState>,
     mut rc_input: ResMut<SimRcInput>,
@@ -1225,10 +1225,10 @@ fn poll_joystick(
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", not(feature = "rc")))]
 fn poll_joystick() {}
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "rc"))]
 fn mode_from_three_pos(value: f32) -> messages::FlightMode {
     if value < -0.33 {
         messages::FlightMode::Acro
@@ -1239,7 +1239,7 @@ fn mode_from_three_pos(value: f32) -> messages::FlightMode {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "rc"))]
 fn find_arm_switch(frame: &RcFrame) -> Option<&rc_joystick::SwitchState> {
     for name in ARM_SWITCH_NAMES {
         if let Some(sw) = frame
@@ -1254,12 +1254,12 @@ fn find_arm_switch(frame: &RcFrame) -> Option<&rc_joystick::SwitchState> {
     frame.switches.first()
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "rc"))]
 fn arm_from_switches(frame: &RcFrame) -> Option<bool> {
     find_arm_switch(frame).map(|s| s.on)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "rc"))]
 fn apply_joystick_frame(frame: &RcFrame, rc_input: &mut SimRcInput) {
     rc_input.roll = frame.roll.clamp(-1.0, 1.0);
     // Match FC stick convention used by keyboard path and RcMapper.
@@ -1637,12 +1637,12 @@ fn track_sim_led_state() {
     let _on = sim_support::sim_activity_led_is_on();
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "rc"))]
 fn axis_or_unmapped(axis: Option<&String>) -> &str {
     axis.map_or("unmapped", String::as_str)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "rc"))]
 fn connected_help_values(view_label: &str, joystick: &RcJoystick) -> String {
     let axes: RcAxisBindings = joystick.axis_bindings();
     let frame = joystick.current_frame();
@@ -1696,7 +1696,7 @@ fn update_help_overlay(
             "{view_label}\nNot connected (plug RC via USB/BT)\nT\n1=Acro 2=Angle 3=PosHold\nSpace (arm Angle / climb)\nWASD\nQ / E\nR"
         ),
         RcInputSource::Joystick => {
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(all(not(target_arch = "wasm32"), feature = "rc"))]
             {
                 _joystick_state.reader.as_ref().map_or_else(
                     || {
@@ -1707,7 +1707,7 @@ fn update_help_overlay(
                     |joy| connected_help_values(view_label, joy),
                 )
             }
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(any(target_arch = "wasm32", not(feature = "rc")))]
             {
                 format!(
                     "{view_label}\nWeb build keyboard mode\nT\n1=Acro 2=Angle 3=PosHold\nSpace (arm Angle / climb)\nWASD\nQ / E\nR"

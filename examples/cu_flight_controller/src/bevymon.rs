@@ -1,7 +1,7 @@
 extern crate alloc;
 
 mod messages;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "rc"))]
 #[path = "sim/rc_joystick.rs"]
 mod rc_joystick;
 mod sim_support;
