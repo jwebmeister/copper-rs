@@ -48,6 +48,7 @@ pub mod flow_msp;
 pub mod gnss;
 pub mod monitor;
 pub mod vtx;
+pub mod camera;
 
 struct LogRateLimiter {
     last: OptionCuTime,

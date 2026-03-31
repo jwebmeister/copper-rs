@@ -4,7 +4,7 @@ use cu_gnss_payloads::{
     GnssAccuracy, GnssCommandAck, GnssEpochTime, GnssFixSolution, GnssFixType, GnssInfoText,
     GnssRawUbxFrame, GnssRfStatus, GnssSatelliteState, GnssSatsInView, GnssSignalState,
 };
-use cu_sensor_payloads::{BarometerPayload, ImuPayload, MagnetometerPayload};
+use cu_sensor_payloads::{BarometerPayload, ImuPayload, MagnetometerPayload, CuImage, CuImageBufferFormat};
 use cu29::prelude::*;
 use cu29::units::si::angle::degree;
 use cu29::units::si::f32::{Angle as Angle32, Length, Velocity};
@@ -13,6 +13,9 @@ use cu29::units::si::length::meter;
 use cu29::units::si::velocity::meter_per_second;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
+use std::ops::{Deref, DerefMut};
+use cu29::rayon::prelude::*;
 
 static SIM_ACTIVITY_LED_STATE: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 static SIM_BATTERY_THROTTLE_BITS: OnceLock<Arc<AtomicU32>> = OnceLock::new();
@@ -24,6 +27,42 @@ const GNSS_FIXED_ELLIPSOID_ALT_M: f32 = 225.0;
 const GNSS_FIXED_MSL_ALT_M: f32 = 212.0;
 const GNSS_FIXED_SAT_COUNT: u8 = 14;
 const EARTH_METERS_PER_DEG_LAT: f64 = 111_320.0;
+
+pub(crate) const IMAGE_FORMAT: CuImageBufferFormat = CuImageBufferFormat{
+    width: 640,
+    height: 480,
+    stride: 640 * 4,
+    pixel_format: *b"RGBA",
+};
+
+static SIM_CAMERA_IMAGE_DATA: OnceLock<Arc<CuHostMemoryPool<Vec<u8>>>> = OnceLock::new();
+
+pub fn sim_camera_get_image_data() -> Arc<CuHostMemoryPool<Vec<u8>>> {
+    SIM_CAMERA_IMAGE_DATA
+        .get_or_init(|| {
+            CuHostMemoryPool::new(
+                "image_src_pool".into(), 
+                8, 
+                || vec![0u8; IMAGE_FORMAT.byte_size()]
+            ).unwrap()
+        })
+        .clone()
+}
+
+pub fn sim_camera_set_image_data(in_data: &Vec<u8>) {
+    let handle = sim_camera_get_image_data()
+        .acquire()
+        .ok_or_else(|| CuError::from("Failed to acquire buffer from image pool")).unwrap();
+
+    // Copy the source data into the pooled buffer
+    handle.with_inner_mut(|inner| {
+        let dest = inner.deref_mut();
+        let copy_len = in_data.len().min(dest.len());
+        dest[..copy_len].copy_from_slice(&in_data[..copy_len]);
+
+    });
+}
+
 
 #[derive(Default)]
 struct SimGnssState {
@@ -378,6 +417,43 @@ impl CuSrcTask for SimGnssSource {
         fix.heading_motion = Angle32::new::<degree>(heading_motion_deg);
 
         output.1.set_payload(fix);
+        Ok(())
+    }
+}
+
+
+#[derive(Reflect)]
+pub struct SimCameraSource {
+    seq: u64,
+}
+
+impl Freezable for SimCameraSource {}
+
+impl CuSrcTask for SimCameraSource {
+    type Resources<'r> = ();
+    type Output<'m> = output_msg!(CuImage<Vec<u8>>);
+
+    fn new(_config: Option<&ComponentConfig>, _resources: Self::Resources<'_>) -> CuResult<Self>
+    where
+        Self: Sized,
+    {
+        Ok(Self {
+            seq: 0,
+        })
+    }
+
+    fn process(&mut self, ctx: &CuContext, output: &mut Self::Output<'_>) -> CuResult<()> {
+
+        let src_handle = sim_camera_get_image_data()
+            .acquire()
+            .ok_or_else(|| CuError::from("Failed to acquire buffer from src image pool"))?;
+
+        let mut image = CuImage::new(IMAGE_FORMAT, src_handle);
+
+        image.seq = self.seq;
+        output.tov = Tov::Time(ctx.now());
+        output.set_payload(image);
+        self.seq = self.seq.wrapping_add(1);
         Ok(())
     }
 }

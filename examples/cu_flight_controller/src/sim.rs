@@ -32,9 +32,11 @@ use bevy::prelude::{
     PerspectiveProjection, Pickable, PluginGroup, PositionType, PostUpdate, Projection, Quat,
     Query, Res, ResMut, Resource, Scene, SceneRoot, Startup, Text, TextColor, TextFont,
     TextureAtlasLayout, Time, Transform, UVec2, UiRect, Update, Val, Vec2, Vec3, Visibility,
-    Window, WindowPlugin, With, Without, default,
+    Window, WindowPlugin, With, Without, default, Timer, TimerMode,
 };
 use bevy::render::render_resource::{TextureDimension, TextureFormat, TextureUsages};
+use bevy::render::view::window::screenshot;
+use bevy::render::render_resource::Extent3d;
 #[cfg(not(target_arch = "wasm32"))]
 use cached_path::{Cache, Error as CacheError, ProgressBar};
 #[cfg(feature = "bevymon")]
@@ -53,7 +55,7 @@ use cu_msp_bridge::MspRequestBatch;
 use cu_msp_lib::structs::{
     MSP_DP_CLEAR_SCREEN, MSP_DP_DRAW_SCREEN, MSP_DP_WRITE_STRING, MspDisplayPort, MspRequest,
 };
-use cu_sensor_payloads::{BarometerPayload, ImuPayload, MagnetometerPayload};
+use cu_sensor_payloads::{BarometerPayload, ImuPayload, MagnetometerPayload, CuImage, CuImageBufferFormat};
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs;
@@ -190,6 +192,9 @@ enum CameraView {
 
 #[derive(Component)]
 struct SimSceneCamera;
+
+#[derive(Component)]
+struct SensorSceneCamera;
 
 #[derive(Component)]
 struct SplitSceneCamera;
@@ -819,7 +824,7 @@ fn setup_world(
         },
         EnvironmentMapLight {
             diffuse_map: skybox_handle.clone(),
-            specular_map: specular_map_handle,
+            specular_map: specular_map_handle.clone(),
             intensity: 900.0,
             ..default()
         },
@@ -838,6 +843,49 @@ fn setup_world(
     } else {
         camera.insert(IsDefaultUiCamera);
     }
+
+    let mut sensor_image = Image::new_uninit(
+        Extent3d{
+            width: sim_support::IMAGE_FORMAT.width,
+            height: sim_support::IMAGE_FORMAT.height,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::all(),
+    );
+    sensor_image.texture_descriptor.usage = TextureUsages::TEXTURE_BINDING
+            | TextureUsages::COPY_DST
+            | TextureUsages::RENDER_ATTACHMENT;
+    let sensor_image_handle = images.add(sensor_image);
+
+    commands.spawn((
+        Name::new("sensor_camera"),
+        Camera3d::default(),
+        Camera {
+            // is_active: true,
+            is_active: false,
+            ..Default::default()
+        },
+        Projection::Perspective(PerspectiveProjection {
+            fov: 90.0_f32.to_radians(),
+            ..default()
+        }),
+        RenderTarget::Image(sensor_image_handle.clone().into()),
+        Skybox {
+            image: skybox_handle.clone(),
+            brightness: 1000.0,
+            ..default()
+        },
+        EnvironmentMapLight {
+            diffuse_map: skybox_handle.clone(),
+            specular_map: specular_map_handle.clone(),
+            intensity: 900.0,
+            ..default()
+        },
+        Transform::from_xyz(-2.0, 1.6, -2.0).looking_at(Vec3::ZERO, Vec3::Y),
+        SensorSceneCamera,
+    ));
 
     commands.spawn((
         Name::new("sun"),
@@ -1470,6 +1518,15 @@ fn run_copper<T: Send + Sync + 'static>(
 
     let mut sim_callback = move |step: gnss::SimStep| -> SimOverride {
         match step {
+            // gnss::SimStep::Camera(CuTaskCallbackState::Process(_, output)) => {
+            //     set_msg_timing(&clock, output);
+            //     let src_handle = sim_support::sim_camera_get_image_data()
+            //         .acquire()
+            //         .ok_or_else(|| CuError::from("Failed to acquire buffer from src image pool")).unwrap();
+            //     let image = CuImage::new(sim_support::IMAGE_FORMAT, src_handle);
+            //     output.set_payload(image);
+            //     SimOverride::ExecutedBySim
+            // }
             gnss::SimStep::Bmi088(CuTaskCallbackState::Process(_, output)) => {
                 set_msg_timing(&clock, output);
                 output.set_payload(ImuPayload::from_raw(
@@ -1617,6 +1674,22 @@ fn camera_follow_quadcopter(
     };
     camera_tf.translation = camera_position;
     *camera_tf = camera_tf.looking_to(quad_tf.forward(), quad_tf.up());
+
+}
+
+fn sensor_camera_follow_quadcopter(
+    quadcopter_query: Query<&GlobalTransform, With<Multicopter>>,
+    mut sensor_camera_query: Query<&mut Transform, (With<SensorSceneCamera>, Without<Multicopter>)>,
+) {
+    let Ok(quad_tf) = quadcopter_query.single() else {
+        return;
+    };
+    let Ok(mut sensor_camera_tf) = sensor_camera_query.single_mut() else {
+        return;
+    };
+
+    sensor_camera_tf.translation = quad_tf.translation() + 0.10 * quad_tf.up() + 0.16 * quad_tf.forward();
+    *sensor_camera_tf = sensor_camera_tf.looking_to(quad_tf.forward(), quad_tf.up());
 }
 
 fn update_quadcopter_visibility(
@@ -2051,6 +2124,63 @@ fn sync_loading_overlay(
     }
 }
 
+#[derive(Resource)]
+struct ScreenshotTimer {
+    /// How often to snap screenshot
+    timer: Timer,
+}
+
+fn setup_screenshot_timer(
+    mut commands: Commands,
+) {
+    commands.insert_resource(ScreenshotTimer {
+        timer: Timer::new(std::time::Duration::from_millis(1000), TimerMode::Repeating),
+    })
+}
+
+fn update_camera_screenshot(
+    mut commands: Commands,
+    images: ResMut<Assets<Image>>,
+    time: Res<Time>,
+    mut screenshot_timer: ResMut<ScreenshotTimer>,
+    mut q_sensor_camera: Query<(&mut Camera, &RenderTarget), With<SensorSceneCamera>>,
+) {
+    screenshot_timer.timer.tick(time.delta());
+    
+    let Ok((mut sensor_camera, render_target)) = q_sensor_camera.single_mut() else {
+        return;
+    };
+    
+    if screenshot_timer.timer.is_finished() {
+        sensor_camera.is_active = true;
+        match render_target {
+            RenderTarget::Image(image_render_target) => {
+                let Some(image) = images.get(&image_render_target.handle) else {return};
+                commands
+                    .spawn(screenshot::Screenshot::image(image_render_target.handle.clone()))
+                    .observe(on_camera_screenshot);
+            },
+            _ => {return},
+        };
+    };
+    
+}
+
+fn on_camera_screenshot(
+    screenshot_captured: bevy::prelude::On<screenshot::ScreenshotCaptured>,
+    mut q_sensor_camera: Query<(&mut Camera, &RenderTarget), With<SensorSceneCamera>>,
+) {
+    let Some(img_data) = &screenshot_captured.image.data else {return};
+    // TODO: sim_camera_set_image_data or down-stream of it is very slow, might also be rerun
+    sim_support::sim_camera_set_image_data(img_data);
+    let Ok((mut sensor_camera, render_target)) = q_sensor_camera.single_mut() else {
+        return;
+    };
+    // screenshot::save_to_disk("./logs/screenshot.png")(screenshot_captured);
+    sensor_camera.is_active = false;
+}
+
+
 pub fn build_world(headless: bool, split_monitor: bool) -> App {
     let mut app = App::new();
     app.insert_resource(SimState::default())
@@ -2087,6 +2217,10 @@ pub fn build_world(headless: bool, split_monitor: bool) -> App {
         (setup_world, setup_full_window_hud_root, setup_joystick),
     )
     .add_systems(
+        Startup,
+        setup_screenshot_timer,
+    )
+    .add_systems(
         Update,
         (
             spawn_loading_overlay,
@@ -2111,6 +2245,7 @@ pub fn build_world(headless: bool, split_monitor: bool) -> App {
             toggle_camera_view,
             update_quadcopter_visibility,
             camera_follow_quadcopter,
+            sensor_camera_follow_quadcopter,
             track_sim_led_state,
             update_help_overlay,
             prepare_osd_raster_source,
@@ -2137,6 +2272,7 @@ pub fn run_sim() {
                 .chain()
                 .after(sync_vehicle_state),
         );
+        app.add_systems(FixedUpdate,update_camera_screenshot);
         app.add_systems(PostUpdate, stop_copper_on_exit::<CopperContext>);
     }
     app.run();
@@ -2164,6 +2300,7 @@ pub fn run_bevymon() {
                 .chain()
                 .after(sync_vehicle_state),
         )
+        .add_systems(FixedUpdate,update_camera_screenshot)
         .add_systems(PostUpdate, stop_copper_on_exit::<LoggerRuntime>);
     app.run();
 }

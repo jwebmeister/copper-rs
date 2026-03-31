@@ -206,6 +206,24 @@
             run_in_sim: true,
             logging: (enabled: true),
         ),
+        (
+            id: "camera",
+            type: "tasks::camera::CameraSource",
+            run_in_sim: true,
+            logging: (enabled: false),
+            config: {
+                "width": 640,
+                "height": 480,
+                "fps": 1,
+                "fourcc": "RGBA",
+            },
+        ),
+        (
+            id: "rerun",
+            type: "tasks::camera::RerunViz",
+            run_in_sim: true,
+            logging: (enabled: false),
+        ),
     ],
     bridges: [
         (
@@ -473,6 +491,11 @@
             src: "gnss_ublox",
             dst: "__nc__",
             msg: "cu_gnss_payloads::GnssRawUbxFrame",
+        ),
+        (
+            src: "camera",
+            dst: "rerun",
+            msg: "cu_sensor_payloads::CuImage<Vec<u8>>",
         ),
     ],
     monitor: (
