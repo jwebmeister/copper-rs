@@ -16,12 +16,12 @@ pub type CameraSource = cu_v4l::V4l;
 #[cfg(all(any(feature = "sim", feature = "bevymon"), not(feature = "firmware")))]
 pub type CameraSource = crate::sim_support::SimCameraSource;
 
-const CAMERA_ENTITY: &str = "camera/image";
-const AHRS_ENTITY: &str = "camera/ahrs";
-const BARO_ENTITY: &str = "camera/baro";
-const HEADING_ENTITY: &str = "camera/heading";
-const GNSS_ENTITY: &str = "camera/gnss";
-const IMU_ENTITY: &str = "camera/imu";
+const CAMERA_ENTITY: &str = "camera";
+const AHRS_ENTITY: &str = "ahrs";
+const BARO_ENTITY: &str = "baro";
+const HEADING_ENTITY: &str = "heading";
+const GNSS_ENTITY: &str = "gnss";
+const IMU_ENTITY: &str = "imu";
 
 /// Convert RGB to RGBA.
 pub fn rgb_to_rgba(data: &[u8], _width: usize, _height: usize) -> Vec<u8> {
@@ -141,15 +141,15 @@ impl RerunViz {
         );
 
         self.rec
-            .log(CAMERA_ENTITY, &rerun_image)
-            .map_err(|e| CuError::new_with_cause("Failed to log image", e))?;
+            .log(format!("{}/image", CAMERA_ENTITY), &rerun_image)
+            .map_err(|e| CuError::new_with_cause("Failed to log camera", e))?;
 
         Ok(())
     }
 
     fn log_ahrs(&self, ahrs: &AhrsPose) -> CuResult<()> {
         let rq_rerun = {
-            let q_avian = avian3d::math::Quaternion::from_euler(avian3d::parry::glamx::EulerRot::XYZ, ahrs.pitch.value, ahrs.yaw.value, ahrs.roll.value);
+            let q_avian = avian3d::math::Quaternion::from_euler(avian3d::parry::glamx::EulerRot::XZY, -ahrs.pitch.value, ahrs.yaw.value, ahrs.roll.value);
             let q_rerun = rerun::Quaternion::from_xyzw(q_avian.to_array());
             let rq_rerun = rerun::components::RotationQuat(q_rerun);
             rq_rerun
@@ -159,7 +159,7 @@ impl RerunViz {
         self.rec
             .log(AHRS_ENTITY,  
                 &[
-                    &t3d_rerun as &dyn rerun::AsComponents,
+                    &t3d_rerun as &dyn AsComponents,
                     &rerun::TransformAxes3D::new(1.0)
                     ]
                 )
@@ -187,17 +187,11 @@ impl RerunViz {
     }
 
     fn log_heading(&self, heading: &GeographicHeading) -> CuResult<()> {
-        let rq_rerun = {
-            let q_avian = avian3d::math::Quaternion::from_euler(avian3d::parry::glamx::EulerRot::XYZ, 0.0, heading.heading.value, 0.0);
-            let q_rerun = rerun::Quaternion::from_xyzw(q_avian.to_array());
-            let rq_rerun = rerun::components::RotationQuat(q_rerun);
-            rq_rerun
-        };
-        let t3d_rerun = rerun::Transform3D::new().with_quaternion(rq_rerun);
+        let h = rerun::Scalars::single(heading.heading.value);
 
         self.rec
             .log(HEADING_ENTITY,
-                &t3d_rerun
+                &h
             )
             .map_err(|e| CuError::new_with_cause("Failed to log heading", e))?;
 
@@ -212,34 +206,56 @@ impl RerunViz {
             .log(format!("{}/latlon", GNSS_ENTITY),
                 &gp_latlon,
                 )
-            .map_err(|e| CuError::new_with_cause("Failed to log gnss", e))?;
+            .map_err(|e| CuError::new_with_cause("Failed to log gnss latlon", e))?;
         self.rec
             .log(format!("{}/height_msl", GNSS_ENTITY),
                 &height_msl,
                 )
-            .map_err(|e| CuError::new_with_cause("Failed to log gnss", e))?;
+            .map_err(|e| CuError::new_with_cause("Failed to log gnss msl", e))?;
 
         Ok(())
     }
 
     fn log_imu(&self , imu: &ImuPayload) -> CuResult<()> {
-        // let accel = rerun::Transform3D::from_translation([imu.accel_x.value, imu.accel_y.value, imu.accel_z.value]);
-        // let ang_vel = rerun::Transform3D::from_translation([imu.gyro_x.value, imu.gyro_y.value, imu.gyro_z.value]);
-
-        let accel_arrows = rerun::Arrows3D::from_vectors([(imu.accel_x.value, imu.accel_y.value, imu.accel_z.value)]);
-        let ang_vel_arrows = rerun::Arrows3D::from_vectors([(imu.gyro_x.value, imu.gyro_y.value, imu.gyro_z.value)]);
-
-        self.rec
-            .log(format!("{}/accel", IMU_ENTITY),
-                &accel_arrows
-                )
-            .map_err(|e| CuError::new_with_cause("Failed to log imu", e))?;
+        let accel_x = rerun::Scalars::single(imu.accel_x.value);
+        let accel_y = rerun::Scalars::single(imu.accel_y.value);
+        let accel_z = rerun::Scalars::single(imu.accel_z.value);
+        
+        let gyro_x = rerun::Scalars::single(imu.gyro_x.value);
+        let gyro_y = rerun::Scalars::single(imu.gyro_y.value);
+        let gyro_z = rerun::Scalars::single(imu.gyro_z.value);
 
         self.rec
-            .log(format!("{}/angvel", IMU_ENTITY),
-                &ang_vel_arrows
+            .log(format!("{}/accel/x", IMU_ENTITY),
+                &accel_x
                 )
-            .map_err(|e| CuError::new_with_cause("Failed to log imu", e))?;
+            .map_err(|e| CuError::new_with_cause("Failed to log imu ax", e))?;
+        self.rec
+            .log(format!("{}/accel/y", IMU_ENTITY),
+                &accel_y
+                )
+            .map_err(|e| CuError::new_with_cause("Failed to log imu ay", e))?;
+        self.rec
+            .log(format!("{}/accel/z", IMU_ENTITY),
+                &accel_z
+                )
+            .map_err(|e| CuError::new_with_cause("Failed to log imu az", e))?;
+
+        self.rec
+            .log(format!("{}/gyro/x", IMU_ENTITY),
+                &gyro_x
+                )
+            .map_err(|e| CuError::new_with_cause("Failed to log imu gx", e))?;
+        self.rec
+            .log(format!("{}/gyro/y", IMU_ENTITY),
+                &gyro_y
+                )
+            .map_err(|e| CuError::new_with_cause("Failed to log imu gy", e))?;
+        self.rec
+            .log(format!("{}/gyro/z", IMU_ENTITY),
+                &gyro_z
+                )
+            .map_err(|e| CuError::new_with_cause("Failed to log imu gz", e))?;
 
         Ok(())
     }
