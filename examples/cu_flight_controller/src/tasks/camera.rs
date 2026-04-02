@@ -1,10 +1,8 @@
 use super::*;
 
 use cu_sensor_payloads::CuImage;
-use cu29::prelude::*;
 use rerun::{
-    Boxes2D, ChannelDatatype, ColorModel, Image, LineStrips2D, Points2D, RecordingStream,
-    RecordingStreamBuilder, Vec2D,
+    ChannelDatatype, ColorModel, Image, RecordingStream, RecordingStreamBuilder,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 

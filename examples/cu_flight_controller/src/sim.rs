@@ -55,7 +55,7 @@ use cu_msp_bridge::MspRequestBatch;
 use cu_msp_lib::structs::{
     MSP_DP_CLEAR_SCREEN, MSP_DP_DRAW_SCREEN, MSP_DP_WRITE_STRING, MspDisplayPort, MspRequest,
 };
-use cu_sensor_payloads::{BarometerPayload, ImuPayload, MagnetometerPayload, CuImage, CuImageBufferFormat};
+use cu_sensor_payloads::{BarometerPayload, ImuPayload, MagnetometerPayload};
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs;
@@ -1518,15 +1518,6 @@ fn run_copper<T: Send + Sync + 'static>(
 
     let mut sim_callback = move |step: gnss::SimStep| -> SimOverride {
         match step {
-            // gnss::SimStep::Camera(CuTaskCallbackState::Process(_, output)) => {
-            //     set_msg_timing(&clock, output);
-            //     let src_handle = sim_support::sim_camera_get_image_data()
-            //         .acquire()
-            //         .ok_or_else(|| CuError::from("Failed to acquire buffer from src image pool")).unwrap();
-            //     let image = CuImage::new(sim_support::IMAGE_FORMAT, src_handle);
-            //     output.set_payload(image);
-            //     SimOverride::ExecutedBySim
-            // }
             gnss::SimStep::Bmi088(CuTaskCallbackState::Process(_, output)) => {
                 set_msg_timing(&clock, output);
                 output.set_payload(ImuPayload::from_raw(
@@ -2134,7 +2125,7 @@ fn setup_screenshot_timer(
     mut commands: Commands,
 ) {
     commands.insert_resource(ScreenshotTimer {
-        timer: Timer::new(std::time::Duration::from_millis(1000), TimerMode::Repeating),
+        timer: Timer::new(std::time::Duration::from_millis(33), TimerMode::Repeating),
     })
 }
 
@@ -2155,7 +2146,7 @@ fn update_camera_screenshot(
         sensor_camera.is_active = true;
         match render_target {
             RenderTarget::Image(image_render_target) => {
-                let Some(image) = images.get(&image_render_target.handle) else {return};
+                let Some(_image) = images.get(&image_render_target.handle) else {return};
                 commands
                     .spawn(screenshot::Screenshot::image(image_render_target.handle.clone()))
                     .observe(on_camera_screenshot);
@@ -2171,9 +2162,9 @@ fn on_camera_screenshot(
     mut q_sensor_camera: Query<(&mut Camera, &RenderTarget), With<SensorSceneCamera>>,
 ) {
     let Some(img_data) = &screenshot_captured.image.data else {return};
-    // TODO: sim_camera_set_image_data or down-stream of it is very slow, might also be rerun
     sim_support::sim_camera_set_image_data(img_data);
-    let Ok((mut sensor_camera, render_target)) = q_sensor_camera.single_mut() else {
+    sim_support::sim_camera_set_image_ready(true);
+    let Ok((mut sensor_camera, _render_target)) = q_sensor_camera.single_mut() else {
         return;
     };
     // screenshot::save_to_disk("./logs/screenshot.png")(screenshot_captured);

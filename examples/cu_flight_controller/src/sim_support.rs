@@ -12,10 +12,8 @@ use cu29::units::si::f64::Angle as Angle64;
 use cu29::units::si::length::meter;
 use cu29::units::si::velocity::meter_per_second;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
-use std::ops::{Deref, DerefMut};
-use cu29::rayon::prelude::*;
+use std::sync::{Arc, OnceLock, Mutex};
+use std::ops::{DerefMut};
 
 static SIM_ACTIVITY_LED_STATE: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 static SIM_BATTERY_THROTTLE_BITS: OnceLock<Arc<AtomicU32>> = OnceLock::new();
@@ -36,17 +34,32 @@ pub(crate) const IMAGE_FORMAT: CuImageBufferFormat = CuImageBufferFormat{
 };
 
 static SIM_CAMERA_IMAGE_DATA: OnceLock<Arc<CuHostMemoryPool<Vec<u8>>>> = OnceLock::new();
+static SIM_CAMERA_IMAGE_READY: OnceLock<Arc<Mutex<bool>>> = OnceLock::new();
 
 pub fn sim_camera_get_image_data() -> Arc<CuHostMemoryPool<Vec<u8>>> {
     SIM_CAMERA_IMAGE_DATA
         .get_or_init(|| {
             CuHostMemoryPool::new(
                 "image_src_pool".into(), 
-                8, 
+                1, 
                 || vec![0u8; IMAGE_FORMAT.byte_size()]
             ).unwrap()
         })
         .clone()
+}
+
+pub fn sim_camera_get_image_ready() -> Arc<Mutex<bool>> {
+    SIM_CAMERA_IMAGE_READY
+        .get_or_init(|| {
+            Arc::new(Mutex::new(false))
+        })
+        .clone()
+}
+
+pub fn sim_camera_set_image_ready(ready: bool) {
+    let ready_handle = sim_camera_get_image_ready();
+    let mut is_ready = ready_handle.lock().unwrap();
+    *is_ready = ready;
 }
 
 pub fn sim_camera_set_image_data(in_data: &Vec<u8>) {
@@ -61,6 +74,9 @@ pub fn sim_camera_set_image_data(in_data: &Vec<u8>) {
         dest[..copy_len].copy_from_slice(&in_data[..copy_len]);
 
     });
+
+    sim_camera_set_image_ready(true);
+    
 }
 
 
@@ -444,16 +460,28 @@ impl CuSrcTask for SimCameraSource {
 
     fn process(&mut self, ctx: &CuContext, output: &mut Self::Output<'_>) -> CuResult<()> {
 
+        {
+            let ready_handle = sim_camera_get_image_ready();
+            let is_ready = ready_handle.lock().unwrap();
+            if !*is_ready {
+                output.clear_payload();
+                return Ok(());
+            }
+        }
+        
         let src_handle = sim_camera_get_image_data()
             .acquire()
             .ok_or_else(|| CuError::from("Failed to acquire buffer from src image pool"))?;
-
+        
         let mut image = CuImage::new(IMAGE_FORMAT, src_handle);
 
         image.seq = self.seq;
         output.tov = Tov::Time(ctx.now());
         output.set_payload(image);
         self.seq = self.seq.wrapping_add(1);
+
+        sim_camera_set_image_ready(false);
+
         Ok(())
     }
 }

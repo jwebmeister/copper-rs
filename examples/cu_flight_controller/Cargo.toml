@@ -266,9 +266,7 @@ sim = [
   "dep:cached-path",
 ]
 bevymon = ["sim_core", "dep:cu-bevymon", "dep:cached-path"]
-rc = [
-  "dep:evdev",
-]
+rc = ["dep:evdev"]
 
 [lib]
 name = "cu_flight_controller_export"
