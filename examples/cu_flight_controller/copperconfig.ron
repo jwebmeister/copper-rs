@@ -497,6 +497,31 @@
             dst: "rerun",
             msg: "cu_sensor_payloads::CuImage<Vec<u8>>",
         ),
+        (
+            src: "ahrs",
+            dst: "rerun",
+            msg: "cu_ahrs::AhrsPose",
+        ),
+        (
+            src: "dps310",
+            dst: "rerun",
+            msg: "cu_sensor_payloads::BarometerPayload",
+        ),
+        (
+            src: "mag_heading",
+            dst: "rerun",
+            msg: "crate::messages::GeographicHeading",
+        ),
+        (
+            src: "gnss_ublox",
+            dst: "rerun",
+            msg: "cu_gnss_payloads::GnssFixSolution",
+        ),
+        (
+            src: "imu_cal",
+            dst: "rerun",
+            msg: "cu_sensor_payloads::ImuPayload",
+        ),
     ],
     monitor: (
         type: "tasks::monitor::FlightMonitor",
